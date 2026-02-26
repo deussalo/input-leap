@@ -1,0 +1,64 @@
+name: Build Windows EXE from Debug Artifact
+
+on:
+  workflow_dispatch:
+    inputs:
+      artifact_url:
+        description: 'URL to the tar.gz artifact'
+        required: true
+        type: string
+
+jobs:
+  build-exe:
+    name: Build Windows EXE
+    runs-on: windows-2022
+    
+    steps:
+      - name: Download artifact
+        run: |
+          Invoke-WebRequest -Uri "${{ github.event.inputs.artifact_url }}" `
+            -OutFile "input-leap-artifact.tar.gz"
+        shell: powershell
+
+      - name: Extract artifact
+        run: |
+          # Install tar if needed (Windows 10 1909+ has tar built-in)
+          tar -xzf input-leap-artifact.tar.gz
+        shell: powershell
+
+      - name: Prepare executable
+        run: |
+          # Find the executable in the extracted directory
+          $exe_path = Get-ChildItem -Recurse -Filter "inputleap.exe" | Select-Object -First 1
+          
+          if ($exe_path) {
+            Write-Host "Found executable at: $($exe_path.FullName)"
+            # Copy to root for easier access
+            Copy-Item $exe_path.FullName -Destination "inputleap.exe"
+          } else {
+            Write-Host "Executable not found, checking directory structure:"
+            Get-ChildItem -Recurse -Filter "*.exe" | ForEach-Object { Write-Host $_.FullName }
+          }
+        shell: powershell
+
+      - name: Create Windows installer (optional - using NSIS)
+        run: |
+          # If you want to create an installer, you can use NSIS
+          # This is optional - you can also just upload the exe directly
+          Write-Host "Executable ready for distribution"
+        shell: powershell
+
+      - name: Upload EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: inputleap-windows-exe
+          path: inputleap.exe
+          if-no-files-found: warn
+
+      - name: Create Release (optional)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: inputleap.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
