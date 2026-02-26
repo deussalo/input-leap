@@ -1,0 +1,88 @@
+name: Build Windows EXE from Debug Artifact
+
+on:
+  workflow_dispatch:
+    inputs:
+      artifact_url:
+        description: 'URL to the tar.gz artifact'
+        required: true
+        type: string
+
+jobs:
+  build-exe:
+    name: Build Windows EXE
+    runs-on: windows-2022
+    
+    steps:
+      - name: Download artifact
+        run: |
+          Invoke-WebRequest -Uri "${{ github.event.inputs.artifact_url }}" `
+            -OutFile "input-leap-artifact.tar.gz"
+          Write-Host "Downloaded artifact"
+        shell: powershell
+
+      - name: Extract artifact
+        run: |
+          tar -xzf input-leap-artifact.tar.gz
+          Write-Host "Extracted artifact"
+        shell: powershell
+
+      - name: Inspect directory structure
+        run: |
+          Write-Host "=== Directory Structure ==="
+          Get-ChildItem -Recurse -Force | ForEach-Object {
+            Write-Host $_.FullName
+          }
+          Write-Host ""
+          Write-Host "=== Looking for executables ==="
+          Get-ChildItem -Recurse -Filter "*.exe" | ForEach-Object {
+            Write-Host "Found EXE: $($_.FullName)"
+            Write-Host "Size: $($_.Length) bytes"
+          }
+        shell: powershell
+
+      - name: Find and copy executable
+        run: |
+          # Search for executables
+          $exes = Get-ChildItem -Recurse -Filter "*.exe"
+          
+          if ($exes.Count -gt 0) {
+            Write-Host "Found $($exes.Count) executable(s)"
+            
+            # If multiple exes, prefer 'inputleap.exe'
+            $target_exe = $exes | Where-Object { $_.Name -eq "inputleap.exe" } | Select-Object -First 1
+            
+            if (-not $target_exe) {
+              # Otherwise take the first exe
+              $target_exe = $exes[0]
+            }
+            
+            Write-Host "Copying: $($target_exe.FullName)"
+            Copy-Item $target_exe.FullName -Destination "inputleap.exe"
+            
+            # Verify the copy
+            if (Test-Path "inputleap.exe") {
+              $size = (Get-Item "inputleap.exe").Length
+              Write-Host "Successfully copied inputleap.exe ($size bytes)"
+            } else {
+              Write-Host "ERROR: Copy failed!"
+              exit 1
+            }
+          } else {
+            Write-Host "ERROR: No executables found!"
+            exit 1
+          }
+        shell: powershell
+
+      - name: List output directory
+        run: |
+          Write-Host "=== Files in current directory ==="
+          Get-ChildItem -Force
+        shell: powershell
+
+      - name: Upload EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: inputleap-windows-exe
+          path: inputleap.exe
+          if-no-files-found: error
