@@ -18,34 +18,66 @@ jobs:
         run: |
           Invoke-WebRequest -Uri "${{ github.event.inputs.artifact_url }}" `
             -OutFile "input-leap-artifact.tar.gz"
+          Write-Host "Downloaded artifact"
         shell: powershell
 
       - name: Extract artifact
         run: |
-          # Install tar if needed (Windows 10 1909+ has tar built-in)
           tar -xzf input-leap-artifact.tar.gz
+          Write-Host "Extracted artifact"
         shell: powershell
 
-      - name: Prepare executable
+      - name: Inspect directory structure
         run: |
-          # Find the executable in the extracted directory
-          $exe_path = Get-ChildItem -Recurse -Filter "inputleap.exe" | Select-Object -First 1
-          
-          if ($exe_path) {
-            Write-Host "Found executable at: $($exe_path.FullName)"
-            # Copy to root for easier access
-            Copy-Item $exe_path.FullName -Destination "inputleap.exe"
-          } else {
-            Write-Host "Executable not found, checking directory structure:"
-            Get-ChildItem -Recurse -Filter "*.exe" | ForEach-Object { Write-Host $_.FullName }
+          Write-Host "=== Directory Structure ==="
+          Get-ChildItem -Recurse -Force | ForEach-Object {
+            Write-Host $_.FullName
+          }
+          Write-Host ""
+          Write-Host "=== Looking for executables ==="
+          Get-ChildItem -Recurse -Filter "*.exe" | ForEach-Object {
+            Write-Host "Found EXE: $($_.FullName)"
+            Write-Host "Size: $($_.Length) bytes"
           }
         shell: powershell
 
-      - name: Create Windows installer (optional - using NSIS)
+      - name: Find and copy executable
         run: |
-          # If you want to create an installer, you can use NSIS
-          # This is optional - you can also just upload the exe directly
-          Write-Host "Executable ready for distribution"
+          # Search for executables
+          $exes = Get-ChildItem -Recurse -Filter "*.exe"
+          
+          if ($exes.Count -gt 0) {
+            Write-Host "Found $($exes.Count) executable(s)"
+            
+            # If multiple exes, prefer 'inputleap.exe'
+            $target_exe = $exes | Where-Object { $_.Name -eq "inputleap.exe" } | Select-Object -First 1
+            
+            if (-not $target_exe) {
+              # Otherwise take the first exe
+              $target_exe = $exes[0]
+            }
+            
+            Write-Host "Copying: $($target_exe.FullName)"
+            Copy-Item $target_exe.FullName -Destination "inputleap.exe"
+            
+            # Verify the copy
+            if (Test-Path "inputleap.exe") {
+              $size = (Get-Item "inputleap.exe").Length
+              Write-Host "Successfully copied inputleap.exe ($size bytes)"
+            } else {
+              Write-Host "ERROR: Copy failed!"
+              exit 1
+            }
+          } else {
+            Write-Host "ERROR: No executables found!"
+            exit 1
+          }
+        shell: powershell
+
+      - name: List output directory
+        run: |
+          Write-Host "=== Files in current directory ==="
+          Get-ChildItem -Force
         shell: powershell
 
       - name: Upload EXE
@@ -53,12 +85,4 @@ jobs:
         with:
           name: inputleap-windows-exe
           path: inputleap.exe
-          if-no-files-found: warn
-
-      - name: Create Release (optional)
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v1
-        with:
-          files: inputleap.exe
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          if-no-files-found: error
